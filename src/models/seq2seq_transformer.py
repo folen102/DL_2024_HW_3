@@ -9,15 +9,15 @@ import src.metrics as metrics
 
 class PositionalEncoding(nn.Module):
     """ Добавление позиционных энкодеров к входным эмбеддингам. """
-    def __init__(self, device, embedding_size, dropout, maxlen=15):
-        super(PositionalEncoding, self).__init__()
-        self.dropout = nn.Dropout(dropout)
+    def __init__(self, device, embedding_size, dropout, max_len=15):
+        super().__init__()
+        self.dropout = nn.Dropout(p = dropout)
 
-        den = torch.exp(-torch.arange(0, embedding_size, 2) * math.log(10000) / embedding_size)
-        pos = torch.arange(0, maxlen).reshape(maxlen, 1)
-        pos_embedding = torch.zeros(maxlen, embedding_size)
-        pos_embedding[:, 0::2] = torch.sin(pos * den)
-        pos_embedding[:, 1::2] = torch.cos(pos * den)
+        position = torch.arange(max_len).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, embedding_size, 2) * (-math.log(10000.0) / embedding_size))
+        pos_embedding = torch.zeros(max_len, embedding_size)
+        pos_embedding[:, 0::2] = torch.sin(position * div_term)
+        pos_embedding[:, 1::2] = torch.cos(position * div_term)
         self.register_buffer('pos_embedding', pos_embedding.unsqueeze(0).to(device))
 
     def forward(self, token_embedding):
