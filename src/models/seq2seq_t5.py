@@ -1,36 +1,50 @@
 import torch
+from torch import nn
+from transformers import T5ForConditionalGeneration, T5Tokenizer, Adafactor
+import src.metrics as metrics
 
-import metrics
-
-
-class Seq2SeqT5(torch.nn.Module):
-    def __init__(self, device):
+class Seq2SeqT5(nn.Module):
+    def __init__(self, device, pretrained_model_name, tokenizer, learning_rate):
         super(Seq2SeqT5, self).__init__()
         self.device = device
-       # TODO: Реализуйте конструктор seq2seq t5 - https://huggingface.co/docs/transformers/model_doc/t5
+        self.tokenizer = tokenizer
+        self.t5_model = T5ForConditionalGeneration.from_pretrained(pretrained_model_name).to(device)
+        self.t5_model.resize_token_embeddings(len(tokenizer))
+        self.optimizer = Adafactor(self.t5_model.parameters(), lr=learning_rate, relative_step=False)
+        self.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 
-    def forward(self, input_tensor: torch.Tensor):
-        # TODO: Реализуйте forward pass для модели, при необходимости реализуйте другие функции для обучения
-        pass
-
+    def forward(self, input_tensor, attention_mask, labels=None):
+        input_tensor = input_tensor.to(self.device)
+        attention_mask = attention_mask.to(self.device)
+        if labels is not None:
+            labels = labels.to(self.device)
+            return self.t5_model(input_ids=input_tensor, attention_mask=attention_mask, labels=labels)
+        return self.t5_model(input_ids=input_tensor, attention_mask=attention_mask)
 
     def training_step(self, batch):
-        # TODO: Реализуйте обучение на 1 батче данных по примеру seq2seq_rnn.py
-        pass
+        self.optimizer.zero_grad()
+        input_tensor, attention_mask, labels = batch['input_ids'], batch['attention_mask'], batch['labels']
+        outputs = self.forward(input_tensor, attention_mask, labels)
+        loss = outputs.loss
+        loss.backward()
+        self.optimizer.step()
+        return loss.item()
 
     def validation_step(self, batch):
-        # TODO: Реализуйте оценку на 1 батче данных по примеру seq2seq_rnn.py
-        pass
+        with torch.no_grad():
+            input_tensor, attention_mask, labels = batch['input_ids'], batch['attention_mask'], batch['labels']
+            outputs = self.forward(input_tensor, attention_mask, labels)
+            loss = outputs.loss
+        return loss.item()
 
-    def eval_bleu(self, predicted_ids_list, target_tensor):
-        predicted = torch.stack(predicted_ids_list)
-        predicted = predicted.squeeze().detach().cpu().numpy().swapaxes(0, 1)[:, 1:]
+    def predict(self, input_tensor, attention_mask):
+        self.eval()
+        with torch.no_grad():
+            generated_ids = self.t5_model.generate(input_ids=input_tensor.to(self.device), attention_mask=attention_mask.to(self.device))
+        return generated_ids
+
+    def eval_bleu(self, predicted_ids, target_tensor):
+        predicted = predicted_ids.squeeze().detach().cpu().numpy()[:, 1:]
         actuals = target_tensor.squeeze().detach().cpu().numpy()[:, 1:]
-        bleu_score, actual_sentences, predicted_sentences = metrics.bleu_scorer(
-            predicted=predicted, actual=actuals, target_tokenizer=self.target_tokenizer
-        )
+        bleu_score, actual_sentences, predicted_sentences = metrics.bleu_scorer(predicted=predicted, actual=actuals, target_tokenizer=self.tokenizer)
         return bleu_score, actual_sentences, predicted_sentences
-
-
-
-
