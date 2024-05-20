@@ -1,15 +1,16 @@
 import torch
 from torch import nn
-from transformers import T5ForConditionalGeneration, T5Tokenizer, Adafactor
-import src.metrics as metrics
+from transformers import T5ForConditionalGeneration, Adafactor
+import src.metrics_t5 as metrics
 
 class Seq2SeqT5(nn.Module):
-    def __init__(self, device, pretrained_model_name, tokenizer, learning_rate):
+    def __init__(self, device, pretrained_model_name, source_tokenizer, target_tokenizer, learning_rate):
         super(Seq2SeqT5, self).__init__()
         self.device = device
-        self.tokenizer = tokenizer
+        self.source_tokenizer = source_tokenizer
+        self.target_tokenizer = target_tokenizer
         self.t5_model = T5ForConditionalGeneration.from_pretrained(pretrained_model_name).to(device)
-        self.t5_model.resize_token_embeddings(len(tokenizer))
+        self.t5_model.resize_token_embeddings(len(self.target_tokenizer))
         self.optimizer = Adafactor(self.t5_model.parameters(), lr=learning_rate, relative_step=False)
         self.loss_fn = nn.CrossEntropyLoss(ignore_index=-100)
 
@@ -46,5 +47,14 @@ class Seq2SeqT5(nn.Module):
     def eval_bleu(self, predicted_ids, target_tensor):
         predicted = predicted_ids.squeeze().detach().cpu().numpy()[:, 1:]
         actuals = target_tensor.squeeze().detach().cpu().numpy()[:, 1:]
-        bleu_score, actual_sentences, predicted_sentences = metrics.bleu_scorer(predicted=predicted, actual=actuals, target_tokenizer=self.tokenizer)
+        bleu_score, actual_sentences, predicted_sentences = metrics.bleu_scorer(predicted=predicted, actual=actuals, target_tokenizer=self.target_tokenizer)
         return bleu_score, actual_sentences, predicted_sentences
+    
+    def adjust_tokenizer(self, corpus: list):
+        new_tokens = set()
+        for sentence in corpus:
+            new_tokens.update(self.source_tokenizer.tokenize(sentence))
+            new_tokens.update(self.target_tokenizer.tokenize(sentence))
+        self.source_tokenizer.add_tokens(list(new_tokens))
+        self.target_tokenizer.add_tokens(list(new_tokens))
+        self.t5_model.resize_token_embeddings(len(self.target_tokenizer))
